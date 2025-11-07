@@ -255,27 +255,55 @@ class IndianLanguageAI {
       
       console.log(`🌐 Fast gTTS request: ${locale}`);
       
+      // MOBILE FIX: Try multiple server URLs (localhost, then network IP)
+      const serverUrls = [
+        'http://localhost:5000/tts',
+        'http://127.0.0.1:5000/tts',
+        // Add your computer's IP here for mobile testing
+        // Example: 'http://192.168.31.27:5000/tts',
+      ];
+      
       // SPEED OPTIMIZATION: Add timeout to prevent hanging
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 3000); // 3 second timeout
       
-      // Call local gTTS server with abort signal
-      const response = await fetch('http://localhost:5000/tts', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          text: text,
-          language: locale
-        }),
-        signal: controller.signal
-      });
+      let response: Response | null = null;
+      let lastError: Error | null = null;
+      
+      // Try each URL until one works
+      for (const url of serverUrls) {
+        try {
+          response = await fetch(url, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              text: text,
+              language: locale
+            }),
+            signal: controller.signal
+          });
+          
+          if (response.ok) {
+            clearTimeout(timeoutId);
+            console.log(`✅ gTTS server connected via ${url}`);
+            break; // Success!
+          }
+        } catch (error: any) {
+          lastError = error;
+          console.warn(`⚠️ Failed to connect to ${url}`);
+          continue; // Try next URL
+        }
+      }
 
       clearTimeout(timeoutId);
 
-      if (!response.ok) {
-        console.warn(`⚠️ gTTS server error: ${response.status}`);
+      if (!response || !response.ok) {
+        console.warn(`⚠️ gTTS server error: ${response?.status || 'No response'}`);
+        if (lastError) {
+          console.warn(`Last error: ${lastError.message}`);
+        }
         return false;
       }
 

@@ -213,15 +213,45 @@ export const useVoxBridgeTranslate = () => {
         console.warn('⚠️ Microphone access limited');
       }
 
+      // Detect mobile and check HTTPS
+      const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+      const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+      const isHTTPS = window.location.protocol === 'https:' || window.location.hostname === 'localhost';
+      
       // Setup speech recognition
       const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
       if (!SpeechRecognition) {
-        throw new Error('Speech recognition not supported. Please use Chrome or Edge.');
+        if (isIOS) {
+          throw new Error('❌ iOS Safari doesn\'t support speech recognition. Please use Chrome on Android or use a desktop browser.');
+        } else if (isMobile && !isHTTPS) {
+          throw new Error('🔒 Mobile requires HTTPS for speech recognition. Please access via https:// or deploy to a secure server (Vercel, Netlify, etc.)');
+        } else {
+          throw new Error('Speech recognition not supported. Please use Chrome or Edge browser.');
+        }
+      }
+      
+      // Warn mobile users about HTTPS requirement
+      if (isMobile && !isHTTPS) {
+        console.warn('⚠️ WARNING: Speech recognition may not work on mobile without HTTPS!');
+      }
+      
+      if (isMobile) {
+        console.log('📱 Mobile device detected - using mobile-optimized settings');
       }
 
       recognitionRef.current = new SpeechRecognition();
-      recognitionRef.current.continuous = true;
-      recognitionRef.current.interimResults = true;
+      
+      // MOBILE FIX: Different settings for mobile vs desktop
+      if (isMobile) {
+        // Mobile browsers often have issues with continuous mode
+        recognitionRef.current.continuous = false; // ← Key fix for mobile!
+        recognitionRef.current.interimResults = false; // Simpler for mobile
+        console.log('📱 Using mobile-optimized speech settings (non-continuous)');
+      } else {
+        recognitionRef.current.continuous = true;
+        recognitionRef.current.interimResults = true;
+      }
+      
       recognitionRef.current.lang = sourceLang.code;
       recognitionRef.current.maxAlternatives = 5; // More alternatives for better accuracy
       
@@ -240,6 +270,28 @@ export const useVoxBridgeTranslate = () => {
 
       let lastProcessedText = '';
       let processingTimeout: NodeJS.Timeout | null = null;
+
+      // MOBILE FIX: Add onstart handler for better logging
+      recognitionRef.current.onstart = () => {
+        console.log('🎤 Speech recognition started successfully');
+        if (isMobile) {
+          console.log('📱 Mobile: Listening for speech... Speak now!');
+        }
+      };
+
+      // MOBILE FIX: Add onspeechstart for detection feedback
+      if ('onspeechstart' in recognitionRef.current) {
+        recognitionRef.current.onspeechstart = () => {
+          console.log('🗣️ Speech detected! Processing...');
+        };
+      }
+
+      // MOBILE FIX: Add onspeechend for detection feedback
+      if ('onspeechend' in recognitionRef.current) {
+        recognitionRef.current.onspeechend = () => {
+          console.log('🔇 Speech ended. Processing result...');
+        };
+      }
 
       recognitionRef.current.onresult = async (event: any) => {
         let interimTranscript = '';
@@ -418,7 +470,25 @@ export const useVoxBridgeTranslate = () => {
           return;
         }
 
-        // If too many restart attempts, recreate recognition instance to prevent memory issues
+        // MOBILE FIX: Auto-restart immediately for continuous listening
+        if (isMobile) {
+          console.log('📱 Mobile: Auto-restarting speech recognition...');
+          setTimeout(() => {
+            if (isListeningRef.current && recognitionRef.current) {
+              try {
+                recognitionRef.current.start();
+                console.log('✅ Mobile: Recognition restarted');
+              } catch (e: any) {
+                if (e.name !== 'InvalidStateError') {
+                  console.error('❌ Mobile restart error:', e);
+                }
+              }
+            }
+          }, 300); // Short delay for mobile
+          return;
+        }
+
+        // Desktop: If too many restart attempts, recreate recognition instance to prevent memory issues
         if (restartAttemptsRef.current >= maxRestartAttempts) {
           console.warn(`⚠️ Too many restart attempts (${restartAttemptsRef.current}), recreating recognition...`);
           restartAttemptsRef.current = 0;
