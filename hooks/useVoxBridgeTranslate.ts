@@ -243,10 +243,11 @@ export const useVoxBridgeTranslate = () => {
       
       // MOBILE FIX: Different settings for mobile vs desktop
       if (isMobile) {
-        // Mobile browsers often have issues with continuous mode
-        recognitionRef.current.continuous = false; // ← Key fix for mobile!
-        recognitionRef.current.interimResults = false; // Simpler for mobile
-        console.log('📱 Using mobile-optimized speech settings (non-continuous)');
+        // Mobile browsers need continuous mode but will auto-stop
+        recognitionRef.current.continuous = true; // ← Changed back to true!
+        recognitionRef.current.interimResults = true; // ← Changed to true for better detection
+        console.log('📱 Using mobile-optimized speech settings');
+        console.log('📱 IMPORTANT: Speak immediately after clicking Start!');
       } else {
         recognitionRef.current.continuous = true;
         recognitionRef.current.interimResults = true;
@@ -427,6 +428,26 @@ export const useVoxBridgeTranslate = () => {
       recognitionRef.current.onerror = (event: any) => {
         console.error('❌ Recognition error:', event.error);
         
+        // MOBILE FIX: Handle "no-speech" error differently
+        if (event.error === 'no-speech') {
+          // This is VERY common on mobile - just means silence
+          console.log('ℹ️ No speech detected (normal) - Keep speaking!');
+          if (isMobile && isListeningRef.current) {
+            // Immediately restart on mobile
+            setTimeout(() => {
+              if (isListeningRef.current && recognitionRef.current) {
+                try {
+                  recognitionRef.current.start();
+                  console.log('📱 Restarted after no-speech');
+                } catch (e) {
+                  console.warn('Could not restart after no-speech');
+                }
+              }
+            }, 100);
+          }
+          return; // Don't treat as error
+        }
+        
         // Reset restart counter on error
         restartAttemptsRef.current = 0;
         
@@ -439,9 +460,6 @@ export const useVoxBridgeTranslate = () => {
         } else if (event.error === 'network') {
           console.warn('⚠️ Network error - will retry on next restart');
           // Don't stop listening for network errors, let it retry
-        } else if (event.error === 'no-speech') {
-          // This is normal, just silence - ignore it
-          console.log('ℹ️ No speech detected (normal)');
         } else if (event.error === 'aborted') {
           // Recognition was stopped - normal, ignore
           console.log('ℹ️ Recognition aborted (normal)');
@@ -470,21 +488,35 @@ export const useVoxBridgeTranslate = () => {
           return;
         }
 
-        // MOBILE FIX: Auto-restart immediately for continuous listening
+        // MOBILE FIX: Always auto-restart on mobile (it stops after each utterance)
         if (isMobile) {
-          console.log('📱 Mobile: Auto-restarting speech recognition...');
+          console.log('📱 Mobile: Recognition stopped, restarting immediately...');
+          // Restart faster on mobile
           setTimeout(() => {
             if (isListeningRef.current && recognitionRef.current) {
               try {
+                console.log('📱 Starting recognition again...');
                 recognitionRef.current.start();
-                console.log('✅ Mobile: Recognition restarted');
+                console.log('✅ Mobile: Recognition restarted - Ready for next speech!');
               } catch (e: any) {
-                if (e.name !== 'InvalidStateError') {
+                if (e.name === 'InvalidStateError') {
+                  console.log('⚠️ Recognition already running');
+                } else {
                   console.error('❌ Mobile restart error:', e);
+                  // Try again after longer delay
+                  setTimeout(() => {
+                    if (isListeningRef.current && recognitionRef.current) {
+                      try {
+                        recognitionRef.current.start();
+                      } catch (err) {
+                        console.error('❌ Second restart attempt failed:', err);
+                      }
+                    }
+                  }, 1000);
                 }
               }
             }
-          }, 300); // Short delay for mobile
+          }, 100); // Faster restart - 100ms
           return;
         }
 
