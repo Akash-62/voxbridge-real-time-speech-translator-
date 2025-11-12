@@ -229,7 +229,17 @@ class IndianLanguageAI {
     }
 
     try {
-      // Try local gTTS server first (best quality)
+      // PRODUCTION FIX: Skip gTTS server if on Vercel/production
+      const isProduction = window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1';
+      
+      if (isProduction) {
+        // Use browser TTS directly in production
+        console.log('🌐 Production mode: Using browser TTS');
+        await this.speakWithBrowserTTS(text, language);
+        return;
+      }
+
+      // Development: Try local gTTS server first (best quality)
       const success = await this.speakWithGTTSServer(text, language);
       if (success) {
         return;
