@@ -267,7 +267,8 @@ class IndianLanguageAI {
   private async speakWithVercelTTS(text: string, language: string): Promise<boolean> {
     try {
       const locale = this.getLocaleCode(language);
-      console.log(`🌐 Vercel TTS request: ${locale}`);
+      console.log(`🌐 Vercel TTS request: "${text}" in ${locale}`);
+      console.log(`📍 Calling: ${window.location.origin}/api/tts`);
       
       // Call Vercel serverless function
       const response = await fetch('/api/tts', {
@@ -281,13 +282,17 @@ class IndianLanguageAI {
         })
       });
 
+      console.log(`📡 Response status: ${response.status} ${response.statusText}`);
+
       if (!response.ok) {
-        console.warn(`⚠️ Vercel TTS error: ${response.status}`);
+        const errorText = await response.text();
+        console.error(`❌ Vercel TTS error: ${response.status} - ${errorText}`);
         return false;
       }
 
       // Get audio blob
       const audioBlob = await response.blob();
+      console.log(`📦 Received audio: ${audioBlob.size} bytes, type: ${audioBlob.type}`);
       
       // Create audio element and play
       const audioUrl = URL.createObjectURL(audioBlob);
@@ -315,7 +320,8 @@ class IndianLanguageAI {
       return true;
 
     } catch (error: any) {
-      console.warn('⚠️ Vercel TTS unavailable:', error.message);
+      console.error('❌ Vercel TTS exception:', error);
+      console.error('Stack:', error.stack);
       return false;
     }
   }
