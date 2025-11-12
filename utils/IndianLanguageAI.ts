@@ -219,7 +219,7 @@ class IndianLanguageAI {
   }
 
   /**
-   * Enhanced Google TTS using Google's gTTS server
+   * Enhanced Google TTS using gTTS via Vercel serverless
    */
   async speakWithIndianContext(text: string, language: string): Promise<void> {
     console.log(`🎤 Speaking: "${text}" in ${language}`);
@@ -229,24 +229,18 @@ class IndianLanguageAI {
     }
 
     try {
-      // Get gTTS server URL from environment variable
-      const gttsServerUrl = import.meta.env.VITE_GTTS_SERVER_URL;
+      // Try gTTS server (Vercel /api/tts or external server)
+      const gttsServerUrl = import.meta.env.VITE_GTTS_SERVER_URL || '/api/tts';
       
-      if (gttsServerUrl) {
-        // Use external gTTS server (Google TTS quality)
-        console.log(`🌐 Using gTTS server: ${gttsServerUrl}`);
-        const success = await this.speakWithGTTSServer(text, language, gttsServerUrl);
-        if (success) {
-          console.log('✅ gTTS server succeeded - Using Google TTS quality!');
-          return;
-        }
-        console.warn('⚠️ gTTS server failed, falling back to browser TTS');
-      } else {
-        console.warn('⚠️ No VITE_GTTS_SERVER_URL set - using browser TTS');
-        console.warn('⚠️ To use Google TTS quality, set VITE_GTTS_SERVER_URL environment variable');
+      console.log(`🌐 Using TTS endpoint: ${gttsServerUrl}`);
+      const success = await this.speakWithGTTSServer(text, language, gttsServerUrl);
+      
+      if (success) {
+        console.log('✅ gTTS succeeded - Using Google TTS quality!');
+        return;
       }
-
-      // Fallback to browser TTS
+      
+      console.warn('⚠️ gTTS server failed, falling back to browser TTS');
       await this.speakWithBrowserTTS(text, language);
 
     } catch (error) {
