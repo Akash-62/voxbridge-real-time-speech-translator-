@@ -219,7 +219,7 @@ class IndianLanguageAI {
   }
 
   /**
-   * Enhanced Google TTS using local gTTS server for native pronunciation
+   * Enhanced Google TTS using Google's gTTS server
    */
   async speakWithIndianContext(text: string, language: string): Promise<void> {
     console.log(`🎤 Speaking: "${text}" in ${language}`);
@@ -229,35 +229,24 @@ class IndianLanguageAI {
     }
 
     try {
-      // PRODUCTION: Check if on Vercel/production
-      const isProduction = window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1';
+      // Get gTTS server URL from environment variable
+      const gttsServerUrl = import.meta.env.VITE_GTTS_SERVER_URL;
       
-      if (isProduction) {
-        // Use Vercel serverless function in production
-        console.log('🌐 Production: Using Vercel serverless TTS');
-        console.log(`📍 API URL: ${window.location.origin}/api/tts`);
-        
-        const success = await this.speakWithVercelTTS(text, language);
+      if (gttsServerUrl) {
+        // Use external gTTS server (Google TTS quality)
+        console.log(`🌐 Using gTTS server: ${gttsServerUrl}`);
+        const success = await this.speakWithGTTSServer(text, language, gttsServerUrl);
         if (success) {
-          console.log('✅ Vercel TTS succeeded - NOT using browser TTS');
+          console.log('✅ gTTS server succeeded - Using Google TTS quality!');
           return;
         }
-        
-        // If Vercel TTS failed, show error clearly
-        console.error('❌ VERCEL TTS FAILED - This should not happen in production!');
-        console.error('❌ Falling back to browser TTS (NOT gTTS!)');
-        await this.speakWithBrowserTTS(text, language);
-        return;
+        console.warn('⚠️ gTTS server failed, falling back to browser TTS');
+      } else {
+        console.warn('⚠️ No VITE_GTTS_SERVER_URL set - using browser TTS');
+        console.warn('⚠️ To use Google TTS quality, set VITE_GTTS_SERVER_URL environment variable');
       }
 
-      // Development: Try local gTTS server first (best quality)
-      const success = await this.speakWithGTTSServer(text, language);
-      if (success) {
-        return;
-      }
-
-      // Fallback to browser TTS if server unavailable
-      console.warn('⚠️ gTTS server unavailable, falling back to browser TTS');
+      // Fallback to browser TTS
       await this.speakWithBrowserTTS(text, language);
 
     } catch (error) {
@@ -268,16 +257,20 @@ class IndianLanguageAI {
   }
 
   /**
-   * Use Vercel serverless function for TTS (production)
+   * Use external gTTS server for high-quality Google TTS
    */
-  private async speakWithVercelTTS(text: string, language: string): Promise<boolean> {
+  private async speakWithGTTSServer(text: string, language: string, serverUrl: string): Promise<boolean> {
     try {
       const locale = this.getLocaleCode(language);
-      console.log(`🌐 Vercel TTS request: "${text}" in ${locale}`);
-      console.log(`📍 Calling: ${window.location.origin}/api/tts`);
       
-      // Call Vercel serverless function
-      const response = await fetch('/api/tts', {
+      console.log(`🌐 Calling gTTS server: ${serverUrl}`);
+      console.log(`🌐 Language: ${locale}, Text: "${text}"`);
+      
+      // Add timeout to prevent hanging
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+      
+      const response = await fetch(serverUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -285,14 +278,17 @@ class IndianLanguageAI {
         body: JSON.stringify({
           text: text,
           language: locale
-        })
+        }),
+        signal: controller.signal
       });
+      
+      clearTimeout(timeoutId);
 
-      console.log(`📡 Response status: ${response.status} ${response.statusText}`);
+      console.log(`📡 Response: ${response.status} ${response.statusText}`);
 
       if (!response.ok) {
         const errorText = await response.text();
-        console.error(`❌ Vercel TTS error: ${response.status} - ${errorText}`);
+        console.error(`❌ gTTS server error: ${response.status} - ${errorText}`);
         return false;
       }
 
@@ -300,6 +296,11 @@ class IndianLanguageAI {
       const audioBlob = await response.blob();
       console.log(`📦 Received audio: ${audioBlob.size} bytes, type: ${audioBlob.type}`);
       
+      if (audioBlob.size === 0) {
+        console.error(`❌ Empty audio received from gTTS server`);
+        return false;
+      }
+
       // Create audio element and play
       const audioUrl = URL.createObjectURL(audioBlob);
       const audio = new Audio(audioUrl);
@@ -310,112 +311,12 @@ class IndianLanguageAI {
       // Play audio
       await audio.play();
       
-      console.log(`⚡ Vercel TTS playing at ${audio.playbackRate}x speed`);
+      console.log(`✅ gTTS playing at ${audio.playbackRate}x speed - GOOGLE TTS QUALITY!`);
       
       // Clean up after playback
       audio.onended = () => {
         URL.revokeObjectURL(audioUrl);
-        console.log(`✅ Vercel TTS completed`);
-      };
-
-      audio.onerror = (error) => {
-        console.error('❌ Audio playback error:', error);
-        URL.revokeObjectURL(audioUrl);
-      };
-
-      return true;
-
-    } catch (error: any) {
-      console.error('❌ Vercel TTS exception:', error);
-      console.error('Stack:', error.stack);
-      return false;
-    }
-  }
-
-  /**
-   * Use local gTTS server for high-quality native pronunciation (optimized)
-   */
-  private async speakWithGTTSServer(text: string, language: string): Promise<boolean> {
-    try {
-      const locale = this.getLocaleCode(language);
-      
-      console.log(`🌐 Fast gTTS request: ${locale}`);
-      
-      // Try multiple server URLs (production Render.com, then localhost for development)
-      const serverUrls = [
-        // PRODUCTION: Add your Render.com URL here after deployment
-        // Example: 'https://voxbridge-gtts-server.onrender.com/tts',
-        import.meta.env.VITE_GTTS_SERVER_URL || 'https://voxbridge-gtts-server.onrender.com/tts', // Production
-        'http://localhost:5000/tts', // Development
-        'http://127.0.0.1:5000/tts', // Development alternative
-      ].filter(url => url); // Remove empty URLs
-      
-      console.log(`🌐 Trying gTTS servers:`, serverUrls);
-      
-      // SPEED OPTIMIZATION: Add timeout to prevent hanging
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout for production
-      
-      let response: Response | null = null;
-      let lastError: Error | null = null;
-      
-      // Try each URL until one works
-      for (const url of serverUrls) {
-        try {
-          console.log(`🔄 Attempting: ${url}`);
-          response = await fetch(url, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              text: text,
-              language: locale
-            }),
-            signal: controller.signal
-          });
-          
-          if (response.ok) {
-            clearTimeout(timeoutId);
-            console.log(`✅ gTTS server connected via ${url}`);
-            break; // Success!
-          }
-        } catch (error: any) {
-          lastError = error;
-          console.warn(`⚠️ Failed to connect to ${url}: ${error.message}`);
-          continue; // Try next URL
-        }
-      }
-
-      clearTimeout(timeoutId);
-
-      if (!response || !response.ok) {
-        console.warn(`⚠️ gTTS server error: ${response?.status || 'No response'}`);
-        if (lastError) {
-          console.warn(`Last error: ${lastError.message}`);
-        }
-        return false;
-      }
-
-      // Get audio blob
-      const audioBlob = await response.blob();
-      
-      // Create audio element and play immediately
-      const audioUrl = URL.createObjectURL(audioBlob);
-      const audio = new Audio(audioUrl);
-      
-      // SPEED OPTIMIZATION: Set playback rate for faster speech
-      audio.playbackRate = this.getSpeechRate(locale);
-      
-      // Play audio immediately
-      await audio.play();
-      
-      console.log(`⚡ Fast gTTS playing for ${locale} at ${audio.playbackRate}x speed`);
-      
-      // Clean up after playback
-      audio.onended = () => {
-        URL.revokeObjectURL(audioUrl);
-        console.log(`✅ gTTS completed for ${locale}`);
+        console.log(`✅ gTTS completed - Was Google TTS!`);
       };
 
       audio.onerror = (error) => {
@@ -427,9 +328,9 @@ class IndianLanguageAI {
 
     } catch (error: any) {
       if (error.name === 'AbortError') {
-        console.warn('⚠️ gTTS server timeout (>3s), switching to browser TTS');
+        console.error('❌ gTTS server timeout (>10s)');
       } else {
-        console.warn('⚠️ gTTS server unavailable:', error.message);
+        console.error('❌ gTTS server error:', error);
       }
       return false;
     }
