@@ -1,11 +1,10 @@
-from flask import Flask, request, jsonify, send_file
-from flask_cors import CORS
+from http.server import BaseHTTPRequestHandler
+from urllib.parse import parse_qs
+import json
 from gtts import gTTS
 import tempfile
 import os
-
-app = Flask(__name__)
-CORS(app)
+import base64
 
 # Language mapping
 LANGUAGE_MAP = {
@@ -18,66 +17,90 @@ LANGUAGE_MAP = {
     'uk': 'uk', 'he': 'iw', 'fa': 'fa', 'sw': 'sw', 'af': 'af', 'am': 'am'
 }
 
-@app.route('/api/tts', methods=['GET', 'POST'])
-def text_to_speech():
-    """Vercel Serverless Function for TTS"""
+class handler(BaseHTTPRequestHandler):
+    """Vercel Serverless Function Handler"""
     
-    # Handle OPTIONS for CORS
-    if request.method == 'OPTIONS':
-        return '', 200
+    def do_OPTIONS(self):
+        """Handle CORS preflight"""
+        self.send_response(200)
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+        self.end_headers()
     
-    # Handle GET for health check
-    if request.method == 'GET':
-        return jsonify({
+    def do_GET(self):
+        """Health check endpoint"""
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.end_headers()
+        
+        response = {
             'status': 'VoxBridge TTS API - Vercel Serverless',
             'version': '2.0',
             'supported_languages': len(LANGUAGE_MAP),
-            'endpoint': '/api/tts (POST)'
-        })
+            'endpoint': '/api/tts (POST with {text, language})'
+        }
+        self.wfile.write(json.dumps(response).encode())
     
-    try:
-        data = request.get_json()
-        text = data.get('text', '').strip()
-        language = data.get('language', 'en')
-        
-        if not text:
-            return jsonify({'error': 'No text provided'}), 400
-        
-        # Get language code
-        lang_code = LANGUAGE_MAP.get(language.lower(), 'en')
-        
-        # Generate speech with gTTS
-        tts = gTTS(text=text, lang=lang_code, slow=False)
-        
-        # Save to temp file
-        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.mp3')
-        tts.save(temp_file.name)
-        temp_file.close()
-        
-        # Send file
-        response = send_file(
-            temp_file.name,
-            mimetype='audio/mpeg',
-            as_attachment=False,
-            download_name='speech.mp3'
-        )
-        
-        # Clean up after sending
-        @response.call_on_close
-        def cleanup():
+    def do_POST(self):
+        """Generate TTS audio"""
+        try:
+            # Read request body
+            content_length = int(self.headers.get('Content-Length', 0))
+            body = self.rfile.read(content_length).decode('utf-8')
+            
+            # Parse JSON
+            data = json.loads(body)
+            text = data.get('text', '').strip()
+            language = data.get('language', 'en')
+            
+            if not text:
+                self.send_response(400)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                self.wfile.write(json.dumps({'error': 'No text provided'}).encode())
+                return
+            
+            # Get language code
+            lang_code = LANGUAGE_MAP.get(language.lower(), 'en')
+            
+            print(f"Generating TTS: '{text}' in {lang_code}")
+            
+            # Generate speech with gTTS
+            tts = gTTS(text=text, lang=lang_code, slow=False)
+            
+            # Save to temp file
+            temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.mp3')
+            tts.save(temp_file.name)
+            temp_file.close()
+            
+            # Read audio file
+            with open(temp_file.name, 'rb') as audio_file:
+                audio_data = audio_file.read()
+            
+            # Clean up temp file
             try:
                 os.unlink(temp_file.name)
             except:
                 pass
-        
-        return response
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-# Vercel serverless handler
-def handler(environ, start_response):
-    """WSGI handler for Vercel"""
-    with app.request_context(environ):
-        response = app.full_dispatch_request()
-        return response(environ, start_response)
+            
+            # Send audio response
+            self.send_response(200)
+            self.send_header('Content-Type', 'audio/mpeg')
+            self.send_header('Content-Length', str(len(audio_data)))
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Cache-Control', 'no-cache')
+            self.end_headers()
+            self.wfile.write(audio_data)
+            
+            print(f"✅ TTS generated successfully: {len(audio_data)} bytes")
+            
+        except Exception as e:
+            print(f"❌ Error: {str(e)}")
+            self.send_response(500)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            self.wfile.write(json.dumps({'error': str(e)}).encode())

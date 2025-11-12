@@ -2,18 +2,14 @@
   "version": 2,
   "builds": [
     {
-      "src": "api/**/*.py",
+      "src": "api/tts.py",
       "use": "@vercel/python"
     }
   ],
   "routes": [
     {
       "src": "/api/tts",
-      "dest": "api/tts.py"
-    },
-    {
-      "src": "/(.*)",
-      "dest": "/$1"
+      "dest": "/api/tts.py"
     }
   ]
 }
