@@ -243,18 +243,18 @@ export const useVoxBridgeTranslate = () => {
       
       // MOBILE FIX: Different settings for mobile vs desktop
       if (isMobile) {
-        // Mobile browsers need continuous mode but will auto-stop
-        recognitionRef.current.continuous = true; // ← Changed back to true!
-        recognitionRef.current.interimResults = true; // ← Changed to true for better detection
+        // Android Chrome requires continuous: false for reliable recognition
+        recognitionRef.current.continuous = false; // ← Key fix for Android!
+        recognitionRef.current.interimResults = true; // Show live transcription
         console.log('📱 Using mobile-optimized speech settings');
-        console.log('📱 IMPORTANT: Speak immediately after clicking Start!');
+        console.log('📱 Android Chrome: Will restart after each phrase');
       } else {
         recognitionRef.current.continuous = true;
         recognitionRef.current.interimResults = true;
       }
       
       recognitionRef.current.lang = sourceLang.code;
-      recognitionRef.current.maxAlternatives = 5; // More alternatives for better accuracy
+      recognitionRef.current.maxAlternatives = 3; // Reduced for mobile performance
       
       // Improve recognition accuracy
       if ('grammars' in recognitionRef.current) {
@@ -274,23 +274,46 @@ export const useVoxBridgeTranslate = () => {
 
       // MOBILE FIX: Add onstart handler for better logging
       recognitionRef.current.onstart = () => {
-        console.log('🎤 Speech recognition started successfully');
+        console.log('✅ Speech recognition ACTIVE - Listening for speech...');
         if (isMobile) {
-          console.log('📱 Mobile: Listening for speech... Speak now!');
+          console.log('📱 Android Chrome: Speak now! Recognition will auto-restart after each phrase.');
         }
       };
 
-      // MOBILE FIX: Add onspeechstart for detection feedback
+      // ANDROID FIX: Add speech detection events for better feedback
       if ('onspeechstart' in recognitionRef.current) {
         recognitionRef.current.onspeechstart = () => {
-          console.log('🗣️ Speech detected! Processing...');
+          console.log('🗣️ Speech DETECTED! Recording...');
         };
       }
 
-      // MOBILE FIX: Add onspeechend for detection feedback
       if ('onspeechend' in recognitionRef.current) {
         recognitionRef.current.onspeechend = () => {
-          console.log('🔇 Speech ended. Processing result...');
+          console.log('🔇 Speech ENDED. Processing...');
+        };
+      }
+      
+      if ('onaudiostart' in recognitionRef.current) {
+        recognitionRef.current.onaudiostart = () => {
+          console.log('🎤 Audio input STARTED');
+        };
+      }
+      
+      if ('onaudioend' in recognitionRef.current) {
+        recognitionRef.current.onaudioend = () => {
+          console.log('🎤 Audio input ENDED');
+        };
+      }
+      
+      if ('onsoundstart' in recognitionRef.current) {
+        recognitionRef.current.onsoundstart = () => {
+          console.log('� Sound DETECTED');
+        };
+      }
+      
+      if ('onsoundend' in recognitionRef.current) {
+        recognitionRef.current.onsoundend = () => {
+          console.log('🔊 Sound ENDED');
         };
       }
 
@@ -298,65 +321,63 @@ export const useVoxBridgeTranslate = () => {
         let interimTranscript = '';
         let newFinalTranscript = '';
 
-          // Process all results including alternatives for better accuracy
+        // Process all results including alternatives for better accuracy
         for (let i = event.resultIndex; i < event.results.length; i++) {
           const result = event.results[i];
           
-          // Use the best alternative (highest confidence)
-          let bestAlternative = result[0];
+          // ANDROID FIX: Use best alternative for better accuracy
+          let bestTranscript = result[0].transcript;
           let bestConfidence = result[0].confidence || 0;
           
-          // Check all alternatives and pick the best one
-          for (let j = 0; j < Math.min(result.length, 5); j++) {
+          // Check alternatives (limit to 3 on mobile for performance)
+          const maxAlts = isMobile ? 3 : 5;
+          for (let j = 0; j < Math.min(result.length, maxAlts); j++) {
             const alt = result[j];
             const altConfidence = alt.confidence || 0;
             if (altConfidence > bestConfidence) {
-              bestAlternative = alt;
+              bestTranscript = alt.transcript;
               bestConfidence = altConfidence;
             }
           }
           
-          const transcript = bestAlternative.transcript;
-          const confidence = bestConfidence;
-          
-          // Log if we used a different alternative
-          if (result.length > 1 && bestAlternative !== result[0]) {
-            console.log(`🎯 Using best alternative: "${transcript}" (${(confidence * 100).toFixed(1)}%) instead of "${result[0].transcript}" (${((result[0].confidence || 0) * 100).toFixed(1)}%)`);
-          }
-          
           if (result.isFinal) {
-            newFinalTranscript += transcript;
-            console.log(`✅ Final: "${transcript}" (confidence: ${(confidence * 100).toFixed(1)}%)`);
+            newFinalTranscript += bestTranscript;
+            console.log(`✅ FINAL: "${bestTranscript}" (${(bestConfidence * 100).toFixed(0)}% confidence)`);
             
-            // Skip if confidence is too low (likely wrong recognition)
-            if (confidence < 0.3) {
-              console.warn(`⚠️ Very low confidence (${(confidence * 100).toFixed(1)}%) - Skipping this result`);
-              continue; // Skip this result
+            // ANDROID FIX: Lower confidence threshold for mobile (Chrome often gives lower confidence)
+            const minConfidence = isMobile ? 0.2 : 0.3;
+            if (bestConfidence < minConfidence && bestConfidence > 0) {
+              console.warn(`⚠️ Low confidence (${(bestConfidence * 100).toFixed(0)}%) - Processing anyway`);
             }
           } else {
-            interimTranscript += transcript;
+            interimTranscript += bestTranscript;
+            if (isMobile) {
+              console.log(`🎙️ Interim: "${bestTranscript}"`);
+            }
           }
         }
 
-        // Show current speech (only interim for preview)
-        setCurrentInputTranscription(interimTranscript);
+        // Show current speech (interim for preview)
+        if (interimTranscript) {
+          setCurrentInputTranscription(interimTranscript);
+        }
 
         // Clear any pending processing timeout
         if (processingTimeout) {
           clearTimeout(processingTimeout);
         }
 
-        // Process final transcript immediately (no accumulation)
+        // Process final transcript immediately
         if (newFinalTranscript.trim() && !isProcessingRef.current) {
           const rawText = newFinalTranscript.trim();
           
-          // Only process if it's new text and meaningful length
-          if (rawText !== lastProcessedText && rawText.length > 1) {
+          // ANDROID FIX: Process even short utterances (1+ chars)
+          if (rawText !== lastProcessedText && rawText.length >= 1) {
             lastProcessedText = rawText;
             
             // Process immediately - FAST MODE!
             isProcessingRef.current = true;
-            console.log(`🧠 Processing: "${rawText}"`);
+            console.log(`🧠 TRANSLATING: "${rawText}"`);
             
             // Clear input immediately for next sentence
             setCurrentInputTranscription('');
@@ -393,8 +414,7 @@ export const useVoxBridgeTranslate = () => {
                 });
 
                 // Speak translation using TTS (NON-BLOCKING - don't wait!)
-                // Process next sentence immediately without waiting for TTS
-                console.log(`🎤 Speaking: "${translation}" (non-blocking)`);
+                console.log(`🔊 SPEAKING: "${translation}"`);
                 if (translation && translation.trim()) {
                   // Don't await - let it play in background!
                   speakTranslation(translation, targetLang).catch(err => {
@@ -418,9 +438,6 @@ export const useVoxBridgeTranslate = () => {
               // Allow next sentence immediately!
               isProcessingRef.current = false;
             })();
-            
-            // Don't wait - allow next sentence processing right away!
-            // isProcessingRef will be set to false inside async function
           }
         }
       };
@@ -428,95 +445,89 @@ export const useVoxBridgeTranslate = () => {
       recognitionRef.current.onerror = (event: any) => {
         console.error('❌ Recognition error:', event.error);
         
-        // MOBILE FIX: Handle "no-speech" error differently
+        // ANDROID FIX: Handle "no-speech" - very common on mobile
         if (event.error === 'no-speech') {
-          // This is VERY common on mobile - just means silence
-          console.log('ℹ️ No speech detected (normal) - Keep speaking!');
-          if (isMobile && isListeningRef.current) {
-            // Immediately restart on mobile
-            setTimeout(() => {
-              if (isListeningRef.current && recognitionRef.current) {
-                try {
-                  recognitionRef.current.start();
-                  console.log('📱 Restarted after no-speech');
-                } catch (e) {
-                  console.warn('Could not restart after no-speech');
-                }
-              }
-            }, 100);
-          }
-          return; // Don't treat as error
+          console.log('ℹ️ No speech detected - This is normal, will restart automatically');
+          // Don't treat as error, let onend handler restart
+          return;
         }
         
-        // Reset restart counter on error
-        restartAttemptsRef.current = 0;
+        // ANDROID FIX: Handle "aborted" - happens when manually stopped or restarted
+        if (event.error === 'aborted') {
+          console.log('ℹ️ Recognition aborted - Normal behavior');
+          return; // Let onend handler manage restart
+        }
         
+        // ANDROID FIX: Network errors - retry automatically
+        if (event.error === 'network') {
+          console.warn('⚠️ Network error - Will retry automatically');
+          return; // Let onend handler restart
+        }
+        
+        // CRITICAL ERRORS: Stop listening
         if (event.error === 'not-allowed') {
-          setError('Microphone access denied. Please allow microphone access.');
+          setError('🎤 Microphone access denied. Please allow microphone in browser settings.');
           isListeningRef.current = false;
-        } else if (event.error === 'audio-capture') {
-          setError('No microphone found. Please connect a microphone.');
-          isListeningRef.current = false;
-        } else if (event.error === 'network') {
-          console.warn('⚠️ Network error - will retry on next restart');
-          // Don't stop listening for network errors, let it retry
-        } else if (event.error === 'aborted') {
-          // Recognition was stopped - normal, ignore
-          console.log('ℹ️ Recognition aborted (normal)');
-        } else {
-          console.warn(`⚠️ Recognition error: ${event.error} - will retry`);
-          // For other errors, try to continue
-          if (isListeningRef.current && status === SessionStatus.CONNECTED) {
-            setTimeout(() => {
-              if (recognitionRef.current && isListeningRef.current) {
-                try {
-                  recognitionRef.current.start();
-                } catch (e) {
-                  console.error('Failed to restart after error:', e);
-                }
-              }
-            }, 100);
-          }
+          setStatus(SessionStatus.ERROR);
+          return;
         }
+        
+        if (event.error === 'audio-capture') {
+          setError('🎤 No microphone found. Please connect a microphone and try again.');
+          isListeningRef.current = false;
+          setStatus(SessionStatus.ERROR);
+          return;
+        }
+        
+        if (event.error === 'service-not-allowed') {
+          setError('🔒 Speech recognition not allowed. Check browser permissions or use HTTPS.');
+          isListeningRef.current = false;
+          setStatus(SessionStatus.ERROR);
+          return;
+        }
+        
+        // OTHER ERRORS: Log and let auto-restart handle it
+        console.warn(`⚠️ Error "${event.error}" - Will retry automatically`);
       };
 
       recognitionRef.current.onend = () => {
-        console.log(`🎤 Recognition ended (restart attempts: ${restartAttemptsRef.current})`);
+        console.log(`🎤 Recognition ended (listening: ${isListeningRef.current})`);
         
         if (!isListeningRef.current || status !== SessionStatus.CONNECTED) {
-          restartAttemptsRef.current = 0; // Reset counter if not listening
+          console.log('🛑 Not restarting - session stopped');
           return;
         }
 
-        // MOBILE FIX: Always auto-restart on mobile (it stops after each utterance)
+        // ANDROID CHROME FIX: Always auto-restart for continuous listening
         if (isMobile) {
-          console.log('📱 Mobile: Recognition stopped, restarting immediately...');
-          // Restart faster on mobile
+          console.log('📱 Android: Recognition stopped, auto-restarting...');
+          // Fast restart for mobile
           setTimeout(() => {
-            if (isListeningRef.current && recognitionRef.current) {
+            if (isListeningRef.current && recognitionRef.current && status === SessionStatus.CONNECTED) {
               try {
-                console.log('📱 Starting recognition again...');
                 recognitionRef.current.start();
-                console.log('✅ Mobile: Recognition restarted - Ready for next speech!');
+                console.log('✅ Android: Recognition restarted');
               } catch (e: any) {
                 if (e.name === 'InvalidStateError') {
-                  console.log('⚠️ Recognition already running');
-                } else {
-                  console.error('❌ Mobile restart error:', e);
-                  // Try again after longer delay
+                  console.log('⚠️ Already running, waiting...');
+                  // Try again with longer delay
                   setTimeout(() => {
-                    if (isListeningRef.current && recognitionRef.current) {
-                      try {
+                    try {
+                      if (isListeningRef.current && recognitionRef.current) {
                         recognitionRef.current.start();
-                      } catch (err) {
-                        console.error('❌ Second restart attempt failed:', err);
                       }
+                    } catch (err) {
+                      console.error('❌ Second restart failed:', err);
                     }
-                  }, 1000);
+                  }, 500);
+                } else {
+                  console.error('❌ Restart error:', e);
                 }
               }
+            } else {
+              console.log('🛑 Not restarting - session ended');
             }
-          }, 100); // Faster restart - 100ms
+          }, 200); // Slightly longer delay for Android stability
           return;
         }
 
