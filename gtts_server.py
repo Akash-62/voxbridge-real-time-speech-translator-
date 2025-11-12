@@ -243,6 +243,11 @@ def get_supported_languages():
     })
 
 if __name__ == '__main__':
+    import os
+    
+    # Get port from environment variable (for Render.com) or use 5000 as default
+    port = int(os.environ.get('PORT', 5000))
+    
     print("=" * 60)
     print("🎤 Google TTS Server Starting...")
     print("=" * 60)
@@ -250,14 +255,15 @@ if __name__ == '__main__':
     print(f"🌍 International: English, Spanish, French, German, Italian, etc.")
     print(f"🇮🇳 Indian: Hindi, Kannada, Malayalam, Tamil, Telugu, Bengali, etc.")
     print(f"🌏 Asian: Chinese, Japanese, Korean, Thai, Vietnamese, etc.")
-    print(f"🌐 Server will run on: http://localhost:5000")
+    print(f"🌐 Server will run on: http://0.0.0.0:{port}")
     print(f"📡 CORS enabled for all origins")
     print("=" * 60)
     
     # Run server
     app.run(
         host='0.0.0.0',
-        port=5000,
+        port=port,
         debug=False,
         threaded=True
     )
+

@@ -229,17 +229,7 @@ class IndianLanguageAI {
     }
 
     try {
-      // PRODUCTION FIX: Skip gTTS server if on Vercel/production
-      const isProduction = window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1';
-      
-      if (isProduction) {
-        // Use browser TTS directly in production
-        console.log('🌐 Production mode: Using browser TTS');
-        await this.speakWithBrowserTTS(text, language);
-        return;
-      }
-
-      // Development: Try local gTTS server first (best quality)
+      // Try gTTS server (local or deployed)
       const success = await this.speakWithGTTSServer(text, language);
       if (success) {
         return;
@@ -265,17 +255,20 @@ class IndianLanguageAI {
       
       console.log(`🌐 Fast gTTS request: ${locale}`);
       
-      // MOBILE FIX: Try multiple server URLs (localhost, then network IP)
+      // Try multiple server URLs (production Render.com, then localhost for development)
       const serverUrls = [
-        'http://localhost:5000/tts',
-        'http://127.0.0.1:5000/tts',
-        // Add your computer's IP here for mobile testing
-        // Example: 'http://192.168.31.27:5000/tts',
-      ];
+        // PRODUCTION: Add your Render.com URL here after deployment
+        // Example: 'https://voxbridge-gtts-server.onrender.com/tts',
+        import.meta.env.VITE_GTTS_SERVER_URL || 'https://voxbridge-gtts-server.onrender.com/tts', // Production
+        'http://localhost:5000/tts', // Development
+        'http://127.0.0.1:5000/tts', // Development alternative
+      ].filter(url => url); // Remove empty URLs
+      
+      console.log(`🌐 Trying gTTS servers:`, serverUrls);
       
       // SPEED OPTIMIZATION: Add timeout to prevent hanging
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 3000); // 3 second timeout
+      const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout for production
       
       let response: Response | null = null;
       let lastError: Error | null = null;
@@ -283,6 +276,7 @@ class IndianLanguageAI {
       // Try each URL until one works
       for (const url of serverUrls) {
         try {
+          console.log(`🔄 Attempting: ${url}`);
           response = await fetch(url, {
             method: 'POST',
             headers: {
@@ -302,7 +296,7 @@ class IndianLanguageAI {
           }
         } catch (error: any) {
           lastError = error;
-          console.warn(`⚠️ Failed to connect to ${url}`);
+          console.warn(`⚠️ Failed to connect to ${url}: ${error.message}`);
           continue; // Try next URL
         }
       }
