@@ -235,11 +235,17 @@ class IndianLanguageAI {
       if (isProduction) {
         // Use Vercel serverless function in production
         console.log('🌐 Production: Using Vercel serverless TTS');
-        const success = await this.speakWithVercelTTS(text, language);
-        if (success) return;
+        console.log(`📍 API URL: ${window.location.origin}/api/tts`);
         
-        // Fallback to browser TTS
-        console.warn('⚠️ Vercel TTS unavailable, using browser TTS');
+        const success = await this.speakWithVercelTTS(text, language);
+        if (success) {
+          console.log('✅ Vercel TTS succeeded - NOT using browser TTS');
+          return;
+        }
+        
+        // If Vercel TTS failed, show error clearly
+        console.error('❌ VERCEL TTS FAILED - This should not happen in production!');
+        console.error('❌ Falling back to browser TTS (NOT gTTS!)');
         await this.speakWithBrowserTTS(text, language);
         return;
       }
