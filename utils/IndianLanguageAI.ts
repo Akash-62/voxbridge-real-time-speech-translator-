@@ -229,7 +229,22 @@ class IndianLanguageAI {
     }
 
     try {
-      // Try gTTS server (local or deployed)
+      // PRODUCTION: Check if on Vercel/production
+      const isProduction = window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1';
+      
+      if (isProduction) {
+        // Use Vercel serverless function in production
+        console.log('🌐 Production: Using Vercel serverless TTS');
+        const success = await this.speakWithVercelTTS(text, language);
+        if (success) return;
+        
+        // Fallback to browser TTS
+        console.warn('⚠️ Vercel TTS unavailable, using browser TTS');
+        await this.speakWithBrowserTTS(text, language);
+        return;
+      }
+
+      // Development: Try local gTTS server first (best quality)
       const success = await this.speakWithGTTSServer(text, language);
       if (success) {
         return;
@@ -243,6 +258,65 @@ class IndianLanguageAI {
       console.error('❌ Speech failed:', error);
       // Try browser TTS as last resort
       await this.speakWithBrowserTTS(text, language).catch(() => {});
+    }
+  }
+
+  /**
+   * Use Vercel serverless function for TTS (production)
+   */
+  private async speakWithVercelTTS(text: string, language: string): Promise<boolean> {
+    try {
+      const locale = this.getLocaleCode(language);
+      console.log(`🌐 Vercel TTS request: ${locale}`);
+      
+      // Call Vercel serverless function
+      const response = await fetch('/api/tts', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          text: text,
+          language: locale
+        })
+      });
+
+      if (!response.ok) {
+        console.warn(`⚠️ Vercel TTS error: ${response.status}`);
+        return false;
+      }
+
+      // Get audio blob
+      const audioBlob = await response.blob();
+      
+      // Create audio element and play
+      const audioUrl = URL.createObjectURL(audioBlob);
+      const audio = new Audio(audioUrl);
+      
+      // Optimized playback rate
+      audio.playbackRate = this.getSpeechRate(locale);
+      
+      // Play audio
+      await audio.play();
+      
+      console.log(`⚡ Vercel TTS playing at ${audio.playbackRate}x speed`);
+      
+      // Clean up after playback
+      audio.onended = () => {
+        URL.revokeObjectURL(audioUrl);
+        console.log(`✅ Vercel TTS completed`);
+      };
+
+      audio.onerror = (error) => {
+        console.error('❌ Audio playback error:', error);
+        URL.revokeObjectURL(audioUrl);
+      };
+
+      return true;
+
+    } catch (error: any) {
+      console.warn('⚠️ Vercel TTS unavailable:', error.message);
+      return false;
     }
   }
 
