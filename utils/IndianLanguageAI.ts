@@ -58,14 +58,14 @@ class IndianLanguageAI {
         const voices = speechSynthesis.getVoices();
         if (voices.length > 0) {
           console.log(`✅ Loaded ${voices.length} voices`);
-          
+
           // Log all available voices for debugging
           voices.forEach(v => {
             if (v.lang.includes('-IN')) {
               console.log(`🔍 Found Indian voice: ${v.name} (${v.lang}) [${v.localService ? 'Local' : 'Remote'}]`);
             }
           });
-          
+
           // Cache best voices for each language with quality priority (60+ languages)
           const languagePriority = [
             // Indian Languages
@@ -89,31 +89,31 @@ class IndianLanguageAI {
 
           languagePriority.forEach(lang => {
             // Priority: Google female voices > Local female > Google male > Local male > Any
-            const googleFemaleVoice = voices.find(v => 
-              v.lang === lang && 
-              v.name.toLowerCase().includes('google') && 
+            const googleFemaleVoice = voices.find(v =>
+              v.lang === lang &&
+              v.name.toLowerCase().includes('google') &&
               (v.name.toLowerCase().includes('female') || v.name.toLowerCase().includes('woman'))
             );
-            
-            const localFemaleVoice = voices.find(v => 
-              v.lang === lang && 
+
+            const localFemaleVoice = voices.find(v =>
+              v.lang === lang &&
               v.localService &&
               (v.name.toLowerCase().includes('female') || v.name.toLowerCase().includes('woman'))
             );
-            
-            const googleVoice = voices.find(v => 
+
+            const googleVoice = voices.find(v =>
               v.lang === lang && v.name.toLowerCase().includes('google')
             );
-            
-            const localVoice = voices.find(v => 
+
+            const localVoice = voices.find(v =>
               v.lang === lang && v.localService
             );
-            
+
             const anyVoice = voices.find(v => v.lang === lang) ||
-                           voices.find(v => v.lang.startsWith(lang.split('-')[0]));
-            
+              voices.find(v => v.lang.startsWith(lang.split('-')[0]));
+
             const bestVoice = googleFemaleVoice || localFemaleVoice || googleVoice || localVoice || anyVoice;
-            
+
             if (bestVoice) {
               this.voiceCache.set(lang, bestVoice);
               console.log(`📢 Cached BEST voice for ${lang}: ${bestVoice.name} [Quality: ${googleFemaleVoice ? 'Excellent' : googleVoice ? 'Good' : 'Fair'}]`);
@@ -150,7 +150,7 @@ class IndianLanguageAI {
 
     // Clean and normalize text for better accuracy
     const cleanText = this.normalizeText(text);
-    
+
     if (cleanText.length === 0) {
       return '';
     }
@@ -172,7 +172,7 @@ class IndianLanguageAI {
 
       // Use Promise.race to get the fastest response
       const fastestResult = await Promise.race(translationPromises);
-      
+
       if (fastestResult.text && fastestResult.text.trim() && fastestResult.confidence > 0.5) {
         console.log(`⚡ Fast translation from ${fastestResult.source}: "${fastestResult.text}" (${(fastestResult.confidence * 100).toFixed(0)}%)`);
         // Cache the result
@@ -235,25 +235,25 @@ class IndianLanguageAI {
       // - Local dev: use VITE_GTTS_SERVER_URL from .env (http://localhost:3002)
       // - Vercel production: use /api/tts serverless function
       const isProduction = window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1';
-      const gttsServerUrl = isProduction 
+      const gttsServerUrl = isProduction
         ? '/api/tts'  // Vercel serverless
         : (import.meta.env.VITE_GTTS_SERVER_URL || 'http://localhost:3002'); // Local dev
-      
+
       console.log(`🌐 Using TTS endpoint: ${gttsServerUrl}`);
       const success = await this.speakWithGTTSServer(text, language, gttsServerUrl);
-      
+
       if (success) {
         console.log('✅ gTTS succeeded - Using Google TTS quality!');
         return;
       }
-      
+
       console.warn('⚠️ gTTS server failed, falling back to browser TTS');
       await this.speakWithBrowserTTS(text, language);
 
     } catch (error) {
       console.error('❌ Speech failed:', error);
       // Try browser TTS as last resort
-      await this.speakWithBrowserTTS(text, language).catch(() => {});
+      await this.speakWithBrowserTTS(text, language).catch(() => { });
     }
   }
 
@@ -263,94 +263,142 @@ class IndianLanguageAI {
   private async speakWithGTTSServer(text: string, language: string, serverUrl: string): Promise<boolean> {
     try {
       const locale = this.getLocaleCode(language);
-      
+
       // OPTIMIZE TEXT FOR BETTER PRONUNCIATION
       const optimizedText = optimizeForTTS(text, locale);
-      
+
       console.log(`🌐 Calling gTTS server: ${serverUrl}`);
       console.log(`🌐 Language: ${locale}`);
       console.log(`📝 Original: "${text}"`);
       console.log(`✨ Optimized: "${optimizedText}"`);
-      
+
       // Split long text for better quality
       const chunks = splitTextForTTS(optimizedText, 200);
       console.log(`📦 Split into ${chunks.length} chunk(s)`);
-      
+
       // Play each chunk sequentially
       for (let i = 0; i < chunks.length; i++) {
         const chunk = chunks[i];
         console.log(`🔊 Playing chunk ${i + 1}/${chunks.length}: "${chunk.substring(0, 50)}..."`);
-        
+
         // Add timeout to prevent hanging
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
-        
-        const response = await fetch(serverUrl, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            text: chunk,
-            language: locale
-          }),
-          signal: controller.signal
-        });
-        
-        clearTimeout(timeoutId);
+        const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
 
-        console.log(`📡 Response: ${response.status} ${response.statusText}`);
+        try {
+          const response = await fetch(serverUrl, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'audio/mpeg'
+            },
+            body: JSON.stringify({
+              text: chunk,
+              language: locale
+            }),
+            signal: controller.signal
+          });
 
-        if (!response.ok) {
-          const errorText = await response.text();
-          console.error(`❌ gTTS server error: ${response.status} - ${errorText}`);
-          return false;
+          clearTimeout(timeoutId);
+
+          console.log(`📡 Response: ${response.status} ${response.statusText}`);
+          console.log(`📡 Response headers:`, {
+            contentType: response.headers.get('content-type'),
+            contentLength: response.headers.get('content-length'),
+            cors: response.headers.get('access-control-allow-origin')
+          });
+
+          if (!response.ok) {
+            let errorDetails = '';
+            try {
+              const errorData = await response.json();
+              errorDetails = JSON.stringify(errorData, null, 2);
+              console.error(`❌ gTTS server error response:`, errorData);
+            } catch {
+              errorDetails = await response.text();
+              console.error(`❌ gTTS server error text: ${errorDetails}`);
+            }
+
+            console.error(`❌ gTTS server failed: ${response.status} ${response.statusText}`);
+            console.error(`❌ Error details: ${errorDetails}`);
+            console.error(`❌ Request URL: ${serverUrl}`);
+            console.error(`❌ Request body:`, { text: chunk, language: locale });
+
+            return false;
+          }
+
+          // Get audio blob
+          const audioBlob = await response.blob();
+          console.log(`📦 Received audio: ${audioBlob.size} bytes, type: ${audioBlob.type}`);
+
+          if (audioBlob.size === 0) {
+            console.error(`❌ Empty audio received from gTTS server`);
+            return false;
+          }
+
+          // Verify it's actually audio
+          if (!audioBlob.type.includes('audio') && !audioBlob.type.includes('mpeg')) {
+            console.error(`❌ Invalid audio type received: ${audioBlob.type}`);
+            const blobText = await audioBlob.text();
+            console.error(`❌ Blob content: ${blobText.substring(0, 200)}`);
+            return false;
+          }
+
+          // Create audio element and play
+          const audioUrl = URL.createObjectURL(audioBlob);
+          const audio = new Audio(audioUrl);
+
+          // Optimized playback rate
+          audio.playbackRate = this.getSpeechRate(locale);
+
+          // Wait for audio to complete before next chunk
+          await new Promise<void>((resolve, reject) => {
+            audio.onended = () => {
+              URL.revokeObjectURL(audioUrl);
+              console.log(`✅ Chunk ${i + 1}/${chunks.length} completed - GOOGLE TTS!`);
+              resolve();
+            };
+
+            audio.onerror = (error) => {
+              console.error('❌ Audio playback error:', error);
+              URL.revokeObjectURL(audioUrl);
+              reject(error);
+            };
+
+            // Start playing
+            audio.play().catch(reject);
+          });
+
+        } catch (chunkError: any) {
+          clearTimeout(timeoutId);
+
+          if (chunkError.name === 'AbortError') {
+            console.error('❌ gTTS server timeout (>15s)');
+          } else {
+            console.error('❌ Chunk processing error:', chunkError);
+          }
+
+          throw chunkError;
         }
-
-        // Get audio blob
-        const audioBlob = await response.blob();
-        console.log(`📦 Received audio: ${audioBlob.size} bytes, type: ${audioBlob.type}`);
-        
-        if (audioBlob.size === 0) {
-          console.error(`❌ Empty audio received from gTTS server`);
-          return false;
-        }
-
-        // Create audio element and play
-        const audioUrl = URL.createObjectURL(audioBlob);
-        const audio = new Audio(audioUrl);
-        
-        // Optimized playback rate
-        audio.playbackRate = this.getSpeechRate(locale);
-        
-        // Wait for audio to complete before next chunk
-        await new Promise<void>((resolve, reject) => {
-          audio.onended = () => {
-            URL.revokeObjectURL(audioUrl);
-            console.log(`✅ Chunk ${i + 1}/${chunks.length} completed - GOOGLE TTS!`);
-            resolve();
-          };
-
-          audio.onerror = (error) => {
-            console.error('❌ Audio playback error:', error);
-            URL.revokeObjectURL(audioUrl);
-            reject(error);
-          };
-
-          // Start playing
-          audio.play().catch(reject);
-        });
       }
 
       console.log(`✅ All chunks completed - gTTS with pronunciation optimization!`);
       return true;
 
     } catch (error: any) {
+      console.error('❌ gTTS server error:', {
+        name: error.name,
+        message: error.message,
+        stack: error.stack
+      });
+
       if (error.name === 'AbortError') {
-        console.error('❌ gTTS server timeout (>10s)');
-      } else {
-        console.error('❌ gTTS server error:', error);
+        console.error('❌ gTTS server timeout (>15s)');
+      } else if (error.name === 'TypeError' && error.message.includes('fetch')) {
+        console.error('❌ Network error - cannot reach gTTS server');
+        console.error('❌ Check if server URL is correct and accessible');
       }
+
       return false;
     }
   }
@@ -384,7 +432,7 @@ class IndianLanguageAI {
 
     // Cancel any ongoing speech
     speechSynthesis.cancel();
-    
+
     // Wait a bit for cancel to complete
     await new Promise(resolve => setTimeout(resolve, 50));
 
@@ -392,7 +440,7 @@ class IndianLanguageAI {
     const processedText = this.preprocessTextForSpeech(text, language);
 
     const utterance = new SpeechSynthesisUtterance(processedText);
-    
+
     // Map language code to full locale
     const locale = this.getLocaleCode(language);
     utterance.lang = locale;
@@ -405,28 +453,28 @@ class IndianLanguageAI {
     } else {
       // Find best available voice with improved selection
       const voices = speechSynthesis.getVoices();
-      
+
       // Priority: Google female > Local female > Google > Local > Language match
-      const googleFemaleVoice = voices.find(v => 
-        v.lang === locale && 
-        v.name.toLowerCase().includes('google') && 
+      const googleFemaleVoice = voices.find(v =>
+        v.lang === locale &&
+        v.name.toLowerCase().includes('google') &&
         (v.name.toLowerCase().includes('female') || v.name.toLowerCase().includes('woman'))
       );
-      
-      const googleVoice = voices.find(v => 
+
+      const googleVoice = voices.find(v =>
         v.lang === locale && v.name.toLowerCase().includes('google')
       );
-      
-      const localVoice = voices.find(v => 
+
+      const localVoice = voices.find(v =>
         v.lang === locale && v.localService
       );
-      
+
       const localeVoice = voices.find(v => v.lang === locale);
-      
+
       const langVoice = voices.find(v => v.lang.startsWith(language));
 
       const selectedVoice = googleFemaleVoice || googleVoice || localVoice || localeVoice || langVoice;
-      
+
       if (selectedVoice) {
         utterance.voice = selectedVoice;
         this.voiceCache.set(locale, selectedVoice);
@@ -461,17 +509,17 @@ class IndianLanguageAI {
    */
   private preprocessTextForSpeech(text: string, language: string): string {
     let processed = text.trim();
-    
+
     // Add pauses for better clarity (using punctuation)
     processed = processed.replace(/([।|])/g, '. ');  // Devanagari danda to period
     processed = processed.replace(/([,;:])/g, '$1 '); // Add space after punctuation
-    
+
     // For English text in Indian context, slow down with commas
     if (language === 'en') {
       // Add slight pauses for better clarity
       processed = processed.replace(/(\w{10,})/g, '$1,');
     }
-    
+
     return processed;
   }
 
@@ -496,10 +544,10 @@ class IndianLanguageAI {
       'gu': 'gu-IN',
       'mr': 'mr-IN',
       'pa': 'pa-IN',
-      
+
       // English
       'en': 'en-US',
-      
+
       // European Languages
       'es': 'es-ES',
       'fr': 'fr-FR',
@@ -519,28 +567,28 @@ class IndianLanguageAI {
       'ro': 'ro-RO',
       'hu': 'hu-HU',
       'uk': 'uk-UA',
-      
+
       // East Asian
       'zh': 'zh-CN',
       'ja': 'ja-JP',
       'ko': 'ko-KR',
-      
+
       // Southeast Asian
       'th': 'th-TH',
       'vi': 'vi-VN',
       'id': 'id-ID',
       'ms': 'ms-MY',
       'fil': 'fil-PH',
-      
+
       // Middle Eastern
       'ar': 'ar-SA',
       'he': 'he-IL',
       'fa': 'fa-IR',
-      
+
       // African
       'af': 'af-ZA',
       'sw': 'sw-KE',
-      
+
       // Other
       'ca': 'ca-ES',
       'hr': 'hr-HR',
@@ -577,7 +625,7 @@ class IndianLanguageAI {
     try {
       const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${sourceLang}|${targetLang}&de=translator@voxbridge.com`;
       const response = await fetch(url);
-      
+
       if (!response.ok) {
         console.warn(`⚠️ MyMemory HTTP error: ${response.status}`);
         return { text: '', confidence: 0, source: 'MyMemory' };
@@ -587,7 +635,7 @@ class IndianLanguageAI {
 
       if (data.responseData && data.responseData.translatedText) {
         const translation = data.responseData.translatedText.trim();
-        
+
         // Validate translation
         if (this.isValidTranslation(translation, text)) {
           const confidence = data.responseData.match || 0.7;
@@ -614,9 +662,9 @@ class IndianLanguageAI {
       console.log(`🌐 Google API Call: "${text}" | ${sourceLang} → ${targetLang}`);
       const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${sourceLang}&tl=${targetLang}&dt=t&q=${encodeURIComponent(text)}`;
       console.log(`   URL: ${url}`);
-      
+
       const response = await fetch(url);
-      
+
       if (!response.ok) {
         console.warn(`⚠️ Google Translate HTTP error: ${response.status}`);
         return { text: '', confidence: 0, source: 'Google' };
@@ -628,7 +676,7 @@ class IndianLanguageAI {
       if (data && data[0] && data[0][0] && data[0][0][0]) {
         const translatedText = data[0][0][0].trim();
         console.log(`   Extracted Translation: "${translatedText}"`);
-        
+
         // Validate translation quality
         if (this.isValidTranslation(translatedText, text)) {
           // Higher confidence for Google Translate
