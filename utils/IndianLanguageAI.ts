@@ -402,12 +402,18 @@ class IndianLanguageAI {
           if (!response.ok) {
             let errorDetails = '';
             try {
-              const errorData = await response.json();
+              // Clone response to avoid "body stream already read" error
+              const errorData = await response.clone().json();
               errorDetails = JSON.stringify(errorData, null, 2);
               console.error(`❌ gTTS server error response:`, errorData);
             } catch {
-              errorDetails = await response.text();
-              console.error(`❌ gTTS server error text: ${errorDetails}`);
+              try {
+                errorDetails = await response.text();
+                console.error(`❌ gTTS server error text: ${errorDetails}`);
+              } catch (e) {
+                errorDetails = 'Unable to read error response';
+                console.error(`❌ Could not read error response:`, e);
+              }
             }
 
             console.error(`❌ gTTS server failed: ${response.status} ${response.statusText}`);
