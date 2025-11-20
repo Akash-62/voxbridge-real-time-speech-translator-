@@ -297,35 +297,82 @@ class IndianLanguageAI {
 
         console.log(`🌐 Direct URL: ${ttsUrl.substring(0, 100)}...`);
 
-        // Create audio element with direct Google TTS URL
-        const audio = new Audio(ttsUrl);
-
-        // Optimized playback rate
-        audio.playbackRate = this.getSpeechRate(locale);
-
-        // Add error handling
-        audio.onerror = (error) => {
-          console.error('❌ Direct Google TTS audio error:', error);
-        };
-
-        // Wait for audio to complete before next chunk
-        await new Promise<void>((resolve, reject) => {
-          audio.onended = () => {
-            console.log(`✅ Chunk ${i + 1}/${chunks.length} completed - DIRECT GOOGLE TTS!`);
-            resolve();
-          };
-
-          audio.onerror = (error) => {
-            console.error('❌ Audio playback error:', error);
-            reject(error);
-          };
-
-          // Start playing
-          audio.play().catch((playError) => {
-            console.error('❌ Play error:', playError);
-            reject(playError);
+        try {
+          // Fetch audio as blob for better reliability (especially for Kannada and other Indian languages)
+          const response = await fetch(ttsUrl, {
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+              'Referer': 'https://translate.google.com/'
+            }
           });
-        });
+
+          if (!response.ok) {
+            console.error(`❌ Google TTS fetch failed: ${response.status} ${response.statusText}`);
+            throw new Error(`Google TTS API returned ${response.status}`);
+          }
+
+          // Convert to blob
+          const audioBlob = await response.blob();
+          console.log(`📦 Received audio blob: ${audioBlob.size} bytes, type: ${audioBlob.type}`);
+
+          if (audioBlob.size === 0) {
+            console.error(`❌ Empty audio blob received for ${locale}`);
+            throw new Error('Empty audio blob');
+          }
+
+          // Verify it's actually audio
+          if (!audioBlob.type.includes('audio') && !audioBlob.type.includes('mpeg')) {
+            console.error(`❌ Invalid audio type received: ${audioBlob.type}`);
+            const blobText = await audioBlob.text();
+            console.error(`❌ Blob content: ${blobText.substring(0, 200)}`);
+            throw new Error(`Invalid audio type received: ${audioBlob.type}`);
+          }
+
+          // Create object URL from blob
+          const audioUrl = URL.createObjectURL(audioBlob);
+          const audio = new Audio(audioUrl);
+
+          // Optimized playback rate
+          audio.playbackRate = this.getSpeechRate(locale);
+
+          // Wait for audio to complete before next chunk
+          await new Promise<void>((resolve, reject) => {
+            audio.onended = () => {
+              URL.revokeObjectURL(audioUrl);
+              console.log(`✅ Chunk ${i + 1}/${chunks.length} completed - DIRECT GOOGLE TTS!`);
+              resolve();
+            };
+
+            audio.onerror = (error) => {
+              console.error(`❌ Audio playback error for ${locale}:`, error);
+              console.error(`❌ Audio src: ${audio.src}`);
+              console.error(`❌ Audio error details:`, {
+                error: audio.error,
+                code: audio.error?.code,
+                message: audio.error?.message
+              });
+              URL.revokeObjectURL(audioUrl);
+              reject(new Error(`Audio playback failed: ${audio.error?.message || 'Unknown error'}`));
+            };
+
+            // Start playing
+            audio.play().catch((playError) => {
+              console.error(`❌ Play error for ${locale}:`, playError);
+              console.error(`❌ Play error name: ${playError.name}`);
+              console.error(`❌ Play error message: ${playError.message}`);
+              URL.revokeObjectURL(audioUrl);
+              reject(playError);
+            });
+          });
+
+        } catch (chunkError: any) {
+          console.error(`❌ Chunk ${i + 1} failed for ${locale}:`, {
+            name: chunkError.name,
+            message: chunkError.message,
+            stack: chunkError.stack
+          });
+          throw chunkError; // Re-throw to trigger fallback
+        }
 
         // Small delay between chunks for natural speech
         if (i < chunks.length - 1) {
