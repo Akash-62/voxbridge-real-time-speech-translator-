@@ -3,6 +3,8 @@
  * Optimized for accuracy and Google TTS integration
  */
 
+import { optimizeForTTS, splitTextForTTS, containsIndianScript } from './PronunciationOptimizer';
+
 interface IndianLanguageLearningData {
   originalText: string;
   translatedText: string;
@@ -229,8 +231,13 @@ class IndianLanguageAI {
     }
 
     try {
-      // Try gTTS server (Vercel /api/tts or external server)
-      const gttsServerUrl = import.meta.env.VITE_GTTS_SERVER_URL || '/api/tts';
+      // Auto-detect environment:
+      // - Local dev: use VITE_GTTS_SERVER_URL from .env (http://localhost:3002)
+      // - Vercel production: use /api/tts serverless function
+      const isProduction = window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1';
+      const gttsServerUrl = isProduction 
+        ? '/api/tts'  // Vercel serverless
+        : (import.meta.env.VITE_GTTS_SERVER_URL || 'http://localhost:3002'); // Local dev
       
       console.log(`🌐 Using TTS endpoint: ${gttsServerUrl}`);
       const success = await this.speakWithGTTSServer(text, language, gttsServerUrl);
@@ -257,67 +264,85 @@ class IndianLanguageAI {
     try {
       const locale = this.getLocaleCode(language);
       
+      // OPTIMIZE TEXT FOR BETTER PRONUNCIATION
+      const optimizedText = optimizeForTTS(text, locale);
+      
       console.log(`🌐 Calling gTTS server: ${serverUrl}`);
-      console.log(`🌐 Language: ${locale}, Text: "${text}"`);
+      console.log(`🌐 Language: ${locale}`);
+      console.log(`📝 Original: "${text}"`);
+      console.log(`✨ Optimized: "${optimizedText}"`);
       
-      // Add timeout to prevent hanging
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+      // Split long text for better quality
+      const chunks = splitTextForTTS(optimizedText, 200);
+      console.log(`📦 Split into ${chunks.length} chunk(s)`);
       
-      const response = await fetch(serverUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          text: text,
-          language: locale
-        }),
-        signal: controller.signal
-      });
-      
-      clearTimeout(timeoutId);
+      // Play each chunk sequentially
+      for (let i = 0; i < chunks.length; i++) {
+        const chunk = chunks[i];
+        console.log(`🔊 Playing chunk ${i + 1}/${chunks.length}: "${chunk.substring(0, 50)}..."`);
+        
+        // Add timeout to prevent hanging
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+        
+        const response = await fetch(serverUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            text: chunk,
+            language: locale
+          }),
+          signal: controller.signal
+        });
+        
+        clearTimeout(timeoutId);
 
-      console.log(`📡 Response: ${response.status} ${response.statusText}`);
+        console.log(`📡 Response: ${response.status} ${response.statusText}`);
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error(`❌ gTTS server error: ${response.status} - ${errorText}`);
-        return false;
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error(`❌ gTTS server error: ${response.status} - ${errorText}`);
+          return false;
+        }
+
+        // Get audio blob
+        const audioBlob = await response.blob();
+        console.log(`📦 Received audio: ${audioBlob.size} bytes, type: ${audioBlob.type}`);
+        
+        if (audioBlob.size === 0) {
+          console.error(`❌ Empty audio received from gTTS server`);
+          return false;
+        }
+
+        // Create audio element and play
+        const audioUrl = URL.createObjectURL(audioBlob);
+        const audio = new Audio(audioUrl);
+        
+        // Optimized playback rate
+        audio.playbackRate = this.getSpeechRate(locale);
+        
+        // Wait for audio to complete before next chunk
+        await new Promise<void>((resolve, reject) => {
+          audio.onended = () => {
+            URL.revokeObjectURL(audioUrl);
+            console.log(`✅ Chunk ${i + 1}/${chunks.length} completed - GOOGLE TTS!`);
+            resolve();
+          };
+
+          audio.onerror = (error) => {
+            console.error('❌ Audio playback error:', error);
+            URL.revokeObjectURL(audioUrl);
+            reject(error);
+          };
+
+          // Start playing
+          audio.play().catch(reject);
+        });
       }
 
-      // Get audio blob
-      const audioBlob = await response.blob();
-      console.log(`📦 Received audio: ${audioBlob.size} bytes, type: ${audioBlob.type}`);
-      
-      if (audioBlob.size === 0) {
-        console.error(`❌ Empty audio received from gTTS server`);
-        return false;
-      }
-
-      // Create audio element and play
-      const audioUrl = URL.createObjectURL(audioBlob);
-      const audio = new Audio(audioUrl);
-      
-      // Optimized playback rate
-      audio.playbackRate = this.getSpeechRate(locale);
-      
-      // Play audio
-      await audio.play();
-      
-      console.log(`✅ gTTS playing at ${audio.playbackRate}x speed - GOOGLE TTS QUALITY!`);
-      
-      // Clean up after playback
-      audio.onended = () => {
-        URL.revokeObjectURL(audioUrl);
-        console.log(`✅ gTTS completed - Was Google TTS!`);
-      };
-
-      audio.onerror = (error) => {
-        console.error('❌ Audio playback error:', error);
-        URL.revokeObjectURL(audioUrl);
-      };
-
+      console.log(`✅ All chunks completed - gTTS with pronunciation optimization!`);
       return true;
 
     } catch (error: any) {
