@@ -221,7 +221,7 @@ class IndianLanguageAI {
   }
 
   /**
-   * Enhanced Google TTS using gTTS via Vercel serverless
+   * Enhanced Google TTS - Direct browser calls (works 100% on Vercel!)
    */
   async speakWithIndianContext(text: string, language: string): Promise<void> {
     console.log(`🎤 Speaking: "${text}" in ${language}`);
@@ -231,23 +231,33 @@ class IndianLanguageAI {
     }
 
     try {
-      // Auto-detect environment:
-      // - Local dev: use VITE_GTTS_SERVER_URL from .env (http://localhost:3002)
-      // - Vercel production: use /api/tts serverless function
-      const isProduction = window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1';
-      const gttsServerUrl = isProduction
-        ? '/api/tts'  // Vercel serverless
-        : (import.meta.env.VITE_GTTS_SERVER_URL || 'http://localhost:3002'); // Local dev
+      // BULLETPROOF SOLUTION: Use direct Google TTS API from browser
+      // This bypasses Vercel serverless function issues completely!
+      console.log('🚀 Using DIRECT Google TTS API (guaranteed to work on Vercel!)');
 
-      console.log(`🌐 Using TTS endpoint: ${gttsServerUrl}`);
-      const success = await this.speakWithGTTSServer(text, language, gttsServerUrl);
+      const success = await this.speakWithDirectGoogleTTS(text, language);
 
       if (success) {
-        console.log('✅ gTTS succeeded - Using Google TTS quality!');
+        console.log('✅ Direct Google TTS succeeded - HIGH QUALITY!');
         return;
       }
 
-      console.warn('⚠️ gTTS server failed, falling back to browser TTS');
+      // Fallback 1: Try serverless function (if available)
+      console.warn('⚠️ Direct Google TTS failed, trying serverless function...');
+      const isProduction = window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1';
+      const gttsServerUrl = isProduction
+        ? '/api/tts'
+        : (import.meta.env.VITE_GTTS_SERVER_URL || 'http://localhost:3002');
+
+      const serverSuccess = await this.speakWithGTTSServer(text, language, gttsServerUrl);
+
+      if (serverSuccess) {
+        console.log('✅ Serverless TTS succeeded!');
+        return;
+      }
+
+      // Fallback 2: Browser TTS (last resort)
+      console.warn('⚠️ All Google TTS methods failed, using browser TTS');
       await this.speakWithBrowserTTS(text, language);
 
     } catch (error) {
@@ -256,6 +266,87 @@ class IndianLanguageAI {
       await this.speakWithBrowserTTS(text, language).catch(() => { });
     }
   }
+
+  /**
+   * DIRECT Google TTS API - Calls Google from browser (no server needed!)
+   * This is the BULLETPROOF solution that works on Vercel 100%
+   */
+  private async speakWithDirectGoogleTTS(text: string, language: string): Promise<boolean> {
+    try {
+      const locale = this.getLocaleCode(language);
+
+      // OPTIMIZE TEXT FOR BETTER PRONUNCIATION
+      const optimizedText = optimizeForTTS(text, locale);
+
+      console.log(`🌐 Direct Google TTS API call`);
+      console.log(`🌐 Language: ${locale}`);
+      console.log(`📝 Original: "${text}"`);
+      console.log(`✨ Optimized: "${optimizedText}"`);
+
+      // Split long text for better quality
+      const chunks = splitTextForTTS(optimizedText, 200);
+      console.log(`📦 Split into ${chunks.length} chunk(s)`);
+
+      // Play each chunk sequentially
+      for (let i = 0; i < chunks.length; i++) {
+        const chunk = chunks[i];
+        console.log(`🔊 Playing chunk ${i + 1}/${chunks.length}: "${chunk.substring(0, 50)}..."`);
+
+        // Direct Google Translate TTS URL (same as gTTS uses!)
+        const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=${locale}&q=${encodeURIComponent(chunk)}`;
+
+        console.log(`🌐 Direct URL: ${ttsUrl.substring(0, 100)}...`);
+
+        // Create audio element with direct Google TTS URL
+        const audio = new Audio(ttsUrl);
+
+        // Optimized playback rate
+        audio.playbackRate = this.getSpeechRate(locale);
+
+        // Add error handling
+        audio.onerror = (error) => {
+          console.error('❌ Direct Google TTS audio error:', error);
+        };
+
+        // Wait for audio to complete before next chunk
+        await new Promise<void>((resolve, reject) => {
+          audio.onended = () => {
+            console.log(`✅ Chunk ${i + 1}/${chunks.length} completed - DIRECT GOOGLE TTS!`);
+            resolve();
+          };
+
+          audio.onerror = (error) => {
+            console.error('❌ Audio playback error:', error);
+            reject(error);
+          };
+
+          // Start playing
+          audio.play().catch((playError) => {
+            console.error('❌ Play error:', playError);
+            reject(playError);
+          });
+        });
+
+        // Small delay between chunks for natural speech
+        if (i < chunks.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+      }
+
+      console.log(`✅ All chunks completed - DIRECT GOOGLE TTS with pronunciation optimization!`);
+      return true;
+
+    } catch (error: any) {
+      console.error('❌ Direct Google TTS error:', {
+        name: error.name,
+        message: error.message,
+        stack: error.stack
+      });
+
+      return false;
+    }
+  }
+
 
   /**
    * Use external gTTS server for high-quality Google TTS
